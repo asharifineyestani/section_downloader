@@ -3,6 +3,8 @@ import datetime
 from bs4 import BeautifulSoup
 from urllib.request import (urlretrieve)
 import os
+import re
+import requests
 
 
 class SectionDownloader:
@@ -15,7 +17,8 @@ class SectionDownloader:
     }
 
     config = {
-        'result_path': './result/'
+        'result_path': './result/',
+        'css_tree_shaker_path': './tree_shaker.css'
     }
 
     req = {
@@ -23,6 +26,11 @@ class SectionDownloader:
     }
 
     file = ''
+
+    html_document = {
+        'classes': [],
+        'styles': [],
+    }
 
     def write_log(self, log_text):
         """ Write log by print() or logger """
@@ -63,12 +71,54 @@ class SectionDownloader:
     def download_images(self):
         soup = BeautifulSoup(self.file, 'html.parser')
         for image in soup.findAll("img"):
-            image["name"] = image["src"].split("/")[-1]
-            image['path'] = image["src"].replace(image["name"], '')
-            os.makedirs(self.config['result_path'] + image['path'], exist_ok=True)
+            self.download(image['src'])
 
-            self.write_log('Downloading image: ' + image["src"][1:])
-            if image["src"].lower().startswith("http"):
-                urlretrieve(image["src"], self.config['result_path'] + image["src"][1:])
-            else:
-                urlretrieve(self.req['url'] + image["src"], self.config['result_path'] + image["src"][1:])
+    def download(self, url):
+        name = url.split("/")[-1]
+        path = url.replace(name, '')
+        os.makedirs(self.config['result_path'] + path, exist_ok=True)
+        self.write_log('Downloading: ' + url[1:])
+        if url.lower().startswith("http"):
+            urlretrieve(url, self.config['result_path'] + url[1:])
+        else:
+            urlretrieve(self.req['url'] + url, self.config['result_path'] + url[1:])
+
+    def download_links(self):
+        response = requests.get(self.req['url'])
+        soup = BeautifulSoup(response.text, 'html.parser')
+        for link in soup.findAll('link', href=True):
+            if re.search(".css", link['href']):
+                self.html_document['styles'].append(self.config['result_path'] + link['href'].replace('./', ''))
+                self.download(link['href'])
+
+    def find_styles_by_class_and_append(self, target_path, selector='.container'):
+        file = open(self.config['css_tree_shaker_path'], 'a')
+        import cssutils
+        statement = ''
+        sheet = cssutils.parseFile(target_path)
+        for rule in sheet:
+            if rule.type == rule.STYLE_RULE:
+                if selector in rule.selectorText:
+                    statement += rule.selectorText
+                    statement += '{'
+                    for css_property in rule.style:
+                        statement += css_property.name + ":" + css_property.value + ";"
+                    statement += '}'
+                    file.write(statement)
+        file.close()
+
+    def tree_shaker_by_class(self):
+        for file_path in self.html_document['styles']:
+            for element_class in self.html_document['classes']:
+                print(element_class)
+                self.find_styles_by_class_and_append(file_path, element_class)
+
+    def find_classes(self):
+        soup = BeautifulSoup(self.file, 'html.parser')
+        classes = []
+        for element in soup.find_all(class_=True):
+            classes.extend(element["class"])
+        self.html_document['classes'] = classes
+
+    def set_css_files(self):
+        self.html_document['styles'] = ['/home/ali/Github/version31/section_downloader/result/assets/css/theme.css']
